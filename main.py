@@ -10,11 +10,11 @@ from log import logger
 from subprocess import run
 
 ACCOUNT = "sociallake"
-BASEDIR = "/streamsets/prod"
+AZ_BASEDIR = "/streamsets/prod"
 DESTDIR = "/home/ubuntu"
-SUBDIRS = [ "cap", "chan", "demo", "discovermovies", "discovery", "disney", "disneymarketing", "europe",
+CLIENTS = [ "cap", "chan", "demo", "discovermovies", "discovery", "disney", "disneymarketing", "europe",
             "ham68", "mexico", "midterms", "midterms_2", "starbucks" ]
-# SUBDIRS = [ "web", "stg", "dev2" ]
+# CLIENTS = [ "web", "stg", "dev2" ]
 
 AZ_CLI_CMD =  "az dls fs" 
 AZ_DOWNLOAD =  "download --account $1 --source-path $2 --destination-path $3 --overwrite"
@@ -23,7 +23,7 @@ AZ_FILE_LIST =  "list --account $1 --path $2"
 S3_BUCKET_NAME = "nk-social-streamsets"
 
 COMPLETED_FILE_NAME = 'completed.txt'
-COMPLETED_FILE_PATH = f"{DESTDIR}/{BASEDIR}/{COMPLETED_FILE_NAME}"
+COMPLETED_FILE_PATH = f"{DESTDIR}/{AZ_BASEDIR}/{COMPLETED_FILE_NAME}"
 
 # list of filepaths already loaded
 
@@ -59,12 +59,18 @@ def get_uploaded_file_list(s3_bucket, prefix):
     logger.info(f"{len(already_uploaded)} have already been uploaded to this bucket")
     return already_uploaded
 
-def get_files(BASEDIR, dir):
-    src_dir = os.path.join(BASEDIR, dir)
+def get_files(AZ_BASEDIR, client):
+    """
+    Given AZ_BASEDIR (/streamsets/prod) and dir (client name)
+    Get the 'list' in the path. Return a list of these values (paths in az)
+    """
+    src_dir = os.path.join(AZ_BASEDIR, client)
     logger.debug(f"Getting files for {src_dir}")
+
     cmd = f"{AZ_CLI_CMD} {AZ_FILE_LIST}"
     cmd = cmd.replace("$1", ACCOUNT).replace("$2", src_dir)
     args = cmd.split(" ")
+
     output = subprocess.run(args, check=True, timeout=300, encoding='utf-8', stdout=subprocess.PIPE)
     entries = json.loads(output.stdout)
     paths = []
@@ -155,8 +161,8 @@ def cleanup(downloads):
 if __name__ == "__main__":
     s3_bucket = get_s3_bucket()
     read_completed_file_list()
-    for dir in SUBDIRS:
-        pathlist = get_files(BASEDIR, dir)
+    for client in CLIENTS:
+        pathlist = get_files(AZ_BASEDIR, client)
         for path in pathlist:
             logger.info(f"Path is {path}")
             if (path not in completed):
