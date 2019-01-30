@@ -80,22 +80,35 @@ def get_files(AZ_BASEDIR, client):
     return sorted(paths, reverse=True)
       
 def download_files(destdir, path):
+    """
+    Downloads file from Azure to desired destination
+    Returns console output
+    The 'path' argument is the directory in az. The local
+    destination directory copies the structure found on az
+    """
     cmd = f"{AZ_CLI_CMD} {AZ_DOWNLOAD}"
-    dest_path = f"{destdir}/{path}"
+    dest_path = f"{destdir}/{path}" 
     cmd = cmd.replace("$1", ACCOUNT).replace("$2", path).replace("$3", dest_path)
     args = cmd.split(" ")
     logger.debug("Downloading files...")
     return(subprocess.run(args, check=True, encoding="utf-8", stdout=subprocess.PIPE))
     
 def get_downloaded_files(dest_dir, filepath):
-    downloads = []
+    """
+    Retrieve the paths to all the files downloaded from Azure to local disk
+    note that filepath does not go down to the file level; hence
+    os.walk is necessary to recurse down to the files
+    ?: os.walk
+    """
+    downloaded_local_files = []
     dest = os.path.join(dest_dir, filepath)
+
     logger.info(f"Finding downloaded files in {dest}")
     for dirname, dirnames, filenames in os.walk(dest):
         for filename in filenames:
-            downloads += [(os.path.join(dirname, filename))]
-    logger.info(f"Found {len(downloads)} downloaded files for {dest}")
-    return sorted(downloads)
+            downloaded_local_files += [(os.path.join(dirname, filename))]
+    logger.info(f"Found {len(downloaded_local_files)} downloaded files for {dest}")
+    return sorted(downloaded_local_files)
 
 def upload_file(tmpfile, filename, bucket):
     logger.debug(f"Attempting to upload {filename}")
