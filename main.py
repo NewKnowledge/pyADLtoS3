@@ -23,21 +23,21 @@ AZ_FILE_LIST =  "list --account $1 --path $2"
 S3_BUCKET_NAME = "nk-social-streamsets"
 
 COMPLETED_FILE_NAME = 'completed.txt'
-COMPLETED_FILE_PATH = f"{DESTDIR}/{AZ_BASEDIR}/{COMPLETED_FILE_NAME}"
+COMPLETED_RECORD_FILE_PATH = f"{DESTDIR}/{AZ_BASEDIR}/{COMPLETED_FILE_NAME}"
 
 # list of filepaths already loaded
 
 completed = set()
 
 def read_completed_file_list():
-    if (os.path.exists(COMPLETED_FILE_PATH)):
-        with open(COMPLETED_FILE_PATH, "r") as compfile:
+    if (os.path.exists(COMPLETED_RECORD_FILE_PATH)):
+        with open(COMPLETED_RECORD_FILE_PATH, "r") as compfile:
             paths = compfile.readlines()
             for path in paths:
                 completed.add(path.rstrip())
     else:
-        with open(COMPLETED_FILE_PATH, "w+"):
-            logger.info(f"Created {COMPLETED_FILE_PATH}")
+        with open(COMPLETED_RECORD_FILE_PATH, "w+"):
+            logger.info(f"Created {COMPLETED_RECORD_FILE_PATH}")
 
 def log_elapsed(func, start):
     elapsed = datetime.now() - start
@@ -51,12 +51,16 @@ def get_s3_bucket():
     return bucket
 
 def get_uploaded_file_list(s3_bucket, prefix):
+    """
+    From s3, grab SET of objects that have already been loaded
+    that has the same prefix (file path on az and local)
+    """
     objects = s3_bucket.objects.filter(Prefix=prefix)
     objlist = list(objects.all())
     already_uploaded = set()
     for obj in objlist:
         already_uploaded.add(obj.key)
-    logger.info(f"{len(already_uploaded)} have already been uploaded to this bucket")
+    logger.info(f"{len(already_uploaded)} with prefix {prefix} have already been uploaded to this bucket")
     return already_uploaded
 
 def get_files(AZ_BASEDIR, client):
@@ -110,19 +114,25 @@ def get_downloaded_files(dest_dir, filepath):
     logger.info(f"Found {len(downloaded_local_files)} downloaded files for {dest}")
     return sorted(downloaded_local_files)
 
-def upload_file(tmpfile, filename, bucket):
-    logger.debug(f"Attempting to upload {filename}")
+def upload_file(local_filepath, s3_destpath, bucket):
+    """
+    Upload file that does not exist on S3 to S3.
+    """
+    logger.debug(f"Attempting to upload {s3_destpath}")
     try:
-        with open(tmpfile, "rb") as data:
-            bucket.upload_fileobj(data, filename)
-        logger.debug(f"Uploaded {filename} to s3 bucket {S3_BUCKET_NAME}")
+        with open(local_filepath, "rb") as data:
+            bucket.upload_fileobj(data, s3_destpath)
+        logger.debug(f"Uploaded {s3_destpath} to s3 bucket {S3_BUCKET_NAME}")
     except Exception as e:
-        logger.error("Error uploading {filename}")
+        logger.error("Error uploading {s3_destpath}")
         logger.exception(e)
     finally:
-        delete_file(tmpfile)
+        delete_file(local_filepath)
 
 def delete_file(filepath):
+    """
+    Delete local file
+    """
     if (os.path.exists(filepath)):
         try:
             os.remove(filepath)
@@ -134,6 +144,8 @@ def delete_file(filepath):
         logger.debug(f"Did not find file {filepath} to delete")
 
 def mark_completed(filepath):
+    """
+    """
     today = datetime.utcnow().date().strftime('%Y-%m-%d')
     elems = filepath.split("/")
     filedate = elems[len(elems)-1]
@@ -141,8 +153,9 @@ def mark_completed(filepath):
         logger.info("Not marking current day as completed")
     else:
         try:
+            #completed is globally defined set
             completed.add(filepath)
-            with open(COMPLETED_FILE_PATH, "a") as comp:
+            with open(COMPLETED_RECORD_FILE_PATH, "a") as comp:
                 comp.write(filepath)
                 comp.write("\n")
                 logger.info(f"Marked {filepath} as completed")
@@ -153,15 +166,17 @@ def copy_files_in_path(filepath):
     start = datetime.now()
     try:
         result = download_files(DESTDIR, filepath)
-        downloads = get_downloaded_files(DESTDIR, filepath)
+        downloaded_file_paths = get_downloaded_files(DESTDIR, filepath)
         already_uploaded = get_uploaded_file_list(s3_bucket, filepath)
-        for srcpath in downloads:
-            destpath = srcpath.replace(f"{DESTDIR}/", "")
-            if (destpath not in already_uploaded):
-                upload_file(srcpath, destpath, s3_bucket) 
-        str = f"Copying {len(downloads)} files in {filepath}"
+
+        for downloaded_file_path in downloaded_file_paths:
+            s3_destpath = downloaded_file_path.replace(f"{DESTDIR}/", "") #remove local directory
+            if (s3_destpath not in already_uploaded):
+                upload_file(downloaded_file_path, s3_destpath, s3_bucket) 
+
+        str = f"Copying {len(downloaded_file_paths)} files in {filepath}"
         mark_completed(filepath)
-        cleanup(downloads)
+        cleanup(downloaded_file_paths)
         log_elapsed(str, start)
     except Exception as e:
         logger.error(f"Error copying files from {filepath} to s3")
