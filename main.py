@@ -40,6 +40,10 @@ def read_completed_file_list():
             logger.info(f"Created {COMPLETED_RECORD_FILE_PATH}")
 
 def log_elapsed(func, start):
+    """
+    timing fn.
+    returns elapsed time.
+    """
     elapsed = datetime.now() - start
     logger.info(f"{func} took {elapsed}")
     return elapsed
@@ -145,6 +149,7 @@ def delete_file(filepath):
 
 def mark_completed(filepath):
     """
+    Add the filepath as completed in the record file
     """
     today = datetime.utcnow().date().strftime('%Y-%m-%d')
     elems = filepath.split("/")
@@ -183,8 +188,11 @@ def copy_files_in_path(filepath):
         logger.exception(e)
         
 def cleanup(downloads):
-   for path in downloads:
-       delete_file(path)
+    """
+    Wait, why is this necessary?
+    """
+    for path in downloads:
+        delete_file(path)
 
 if __name__ == "__main__":
     s3_bucket = get_s3_bucket()
