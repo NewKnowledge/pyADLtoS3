@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import subprocess
-import json
+import json                     
 import boto3.s3
 import os
+import az_utils
 from datetime import date, datetime, timedelta
 
 from log import logger
@@ -16,6 +17,7 @@ CLIENTS = [ "cap", "chan", "demo", "discovermovies", "discovery", "disney", "dis
             "ham68", "mexico", "midterms", "midterms_2", "starbucks" ]
 # CLIENTS = [ "web", "stg", "dev2" ]
 
+AZ_LOGIN_CMD = ""
 AZ_CLI_CMD =  "az dls fs" 
 AZ_DOWNLOAD =  "download --account $1 --source-path $2 --destination-path $3 --overwrite"
 AZ_FILE_LIST =  "list --account $1 --path $2"
@@ -67,25 +69,7 @@ def get_uploaded_file_list(s3_bucket, prefix):
     logger.info(f"{len(already_uploaded)} with prefix {prefix} have already been uploaded to this bucket")
     return already_uploaded
 
-def get_files(AZ_BASEDIR, client):
-    """
-    Given AZ_BASEDIR (/streamsets/prod) and dir (client name)
-    Get the 'list' in the path. Return a list of these values (paths in az)
-    """
-    src_dir = os.path.join(AZ_BASEDIR, client)
-    logger.debug(f"Getting files for {src_dir}")
 
-    cmd = f"{AZ_CLI_CMD} {AZ_FILE_LIST}"
-    cmd = cmd.replace("$1", ACCOUNT).replace("$2", src_dir)
-    args = cmd.split(" ")
-
-    output = subprocess.run(args, check=True, timeout=300, encoding='utf-8', stdout=subprocess.PIPE)
-    entries = json.loads(output.stdout)
-    paths = []
-    for entry in entries:
-        paths += [entry.get('name')]
-    logger.info(f"Found {len(paths)} files in {src_dir}")
-    return sorted(paths, reverse=True)
       
 def download_files(destdir, path):
     """
@@ -197,8 +181,9 @@ def cleanup(downloads):
 if __name__ == "__main__":
     s3_bucket = get_s3_bucket()
     read_completed_file_list()
+    
     for client in CLIENTS:
-        pathlist = get_files(AZ_BASEDIR, client)
+        pathlist = az_utils.get_files(AZ_BASEDIR, client)
         for path in pathlist:
             logger.info(f"Path is {path}")
             if (path not in completed):
