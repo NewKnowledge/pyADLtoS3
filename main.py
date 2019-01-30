@@ -5,14 +5,14 @@ import json
 import boto3.s3
 import os
 import az_utils
-from datetime import date, datetime, timedelta
-
+# from datetime import date, datetime, timedelta
+from datetime import datetime
 from log import logger
-from subprocess import run
+# from subprocess import run
 
 ACCOUNT = "sociallake"
 AZ_BASEDIR = "/streamsets/prod"
-DESTDIR = "/home/ubuntu"
+DESTDIR = "/home/dan/NewKnowledge/tmpfile"
 CLIENTS = [ "cap", "chan", "demo", "discovermovies", "discovery", "disney", "disneymarketing", "europe",
             "ham68", "mexico", "midterms", "midterms_2", "starbucks" ]
 # CLIENTS = [ "web", "stg", "dev2" ]
@@ -30,6 +30,45 @@ COMPLETED_RECORD_FILE_PATH = f"{DESTDIR}/{AZ_BASEDIR}/{COMPLETED_FILE_NAME}"
 # list of filepaths already loaded
 
 completed = set()
+
+def download_and_transfer_hour(s3_bucket, destdir, path_with_date):
+    hourly_paths = hourly_filepaths(destdir, path_with_date)
+    
+    for hourly_path in hourly_paths:
+        start = datetime.now()
+
+        logger.info(f"downloading from {hourly_path}")
+        az_utils.download_files(destdir, hourly_path)
+        downloaded_file_paths = get_downloaded_files(destdir, hourly_path)
+        already_uploaded = get_uploaded_file_list(s3_bucket, hourly_path)
+
+        for downloaded_file_path in downloaded_file_paths:
+            s3_destpath = downloaded_file_path.replace(f"{destdir}/", "")
+            if (s3_destpath not in already_uploaded):
+                logger.info(f"\t upld {downloaded_file_path[11:80]}")
+                upload_file(downloaded_file_path, s3_destpath, s3_bucket)
+            else:
+                logger.info(f"\t skip {downloaded_file_path[11:80]}")
+
+        str = f"Copying {len(downloaded_file_paths)} files in {path_with_date}"
+        log_elapsed(str, start)
+        cleanup(downloaded_file_paths)
+        
+
+def hourly_filepaths(destdir, path_with_date):
+    file_list_subcommand = AZ_FILE_LIST.replace("$1", ACCOUNT).replace("$2", path_with_date)
+    az_command = f"{AZ_CLI_CMD} {file_list_subcommand}"
+
+    args = az_command.split(" ")
+    cli_output = subprocess.run(args, check=True, timeout=300, encoding='utf-8', stdout=subprocess.PIPE)
+    cli_jsons = json.loads(cli_output.stdout)
+
+    hourly_paths = []
+    for entry in cli_jsons:
+        hourly_paths += [entry.get('name')]
+
+    logger.info(f"Found {len(hourly_paths)} files in {path_with_date}")
+    return sorted(hourly_paths, reverse=True)
 
 def read_completed_file_list():
     if (os.path.exists(COMPLETED_RECORD_FILE_PATH)):
@@ -70,20 +109,6 @@ def get_uploaded_file_list(s3_bucket, prefix):
     return already_uploaded
 
 
-      
-def download_files(destdir, path):
-    """
-    Downloads file from Azure to desired destination
-    Returns console output
-    The 'path' argument is the directory in az. The local
-    destination directory copies the structure found on az
-    """
-    cmd = f"{AZ_CLI_CMD} {AZ_DOWNLOAD}"
-    dest_path = f"{destdir}/{path}" 
-    cmd = cmd.replace("$1", ACCOUNT).replace("$2", path).replace("$3", dest_path)
-    args = cmd.split(" ")
-    logger.debug("Downloading files...")
-    return(subprocess.run(args, check=True, encoding="utf-8", stdout=subprocess.PIPE))
     
 def get_downloaded_files(dest_dir, filepath):
     """
@@ -151,25 +176,25 @@ def mark_completed(filepath):
         except Exception as e:
             logger.error(f"Unable to mark {filepath} as completed, continuing...")
   
-def copy_files_in_path(filepath):
-    start = datetime.now()
-    try:
-        result = download_files(DESTDIR, filepath)
-        downloaded_file_paths = get_downloaded_files(DESTDIR, filepath)
-        already_uploaded = get_uploaded_file_list(s3_bucket, filepath)
+# def copy_files_in_path(filepath):
+#     start = datetime.now()
+#     try:
+#         result = download_files(DESTDIR, filepath)
+#         downloaded_file_paths = get_downloaded_files(DESTDIR, filepath)
+#         already_uploaded = get_uploaded_file_list(s3_bucket, filepath)
 
-        for downloaded_file_path in downloaded_file_paths:
-            s3_destpath = downloaded_file_path.replace(f"{DESTDIR}/", "") #remove local directory
-            if (s3_destpath not in already_uploaded):
-                upload_file(downloaded_file_path, s3_destpath, s3_bucket) 
+#         for downloaded_file_path in downloaded_file_paths:
+#             s3_destpath = downloaded_file_path.replace(f"{DESTDIR}/", "") #remove local directory
+#             if (s3_destpath not in already_uploaded):
+#                 upload_file(downloaded_file_path, s3_destpath, s3_bucket) 
 
-        str = f"Copying {len(downloaded_file_paths)} files in {filepath}"
-        mark_completed(filepath)
-        cleanup(downloaded_file_paths)
-        log_elapsed(str, start)
-    except Exception as e:
-        logger.error(f"Error copying files from {filepath} to s3")
-        logger.exception(e)
+#         str = f"Copying {len(downloaded_file_paths)} files in {filepath}"
+#         mark_completed(filepath)
+#         cleanup(downloaded_file_paths)
+#         log_elapsed(str, start)
+#     except Exception as e:
+#         logger.error(f"Error copying files from {filepath} to s3")
+#         logger.exception(e)
         
 def cleanup(downloads):
     """
@@ -182,12 +207,40 @@ if __name__ == "__main__":
     s3_bucket = get_s3_bucket()
     read_completed_file_list()
     
-    for client in CLIENTS:
-        pathlist = az_utils.get_files(AZ_BASEDIR, client)
-        for path in pathlist:
-            logger.info(f"Path is {path}")
-            if (path not in completed):
-                logger.info(f"Path {path} not found in completed")
-                copy_files_in_path(path)
-            else:
+    for client in ["discovery"]:#CLIENTS: #TODO
+        logger.info("client: {}".format(client))
+        try:
+            pathlist = az_utils.get_directories_az(AZ_BASEDIR, client)
+        except Exception as e:
+            logger.warning("Could not get directories from az: {}".format(e))
+            continue
+
+        for path in pathlist: #paths with date
+            if (path in completed):
                 logger.info(f"{path} has already been copied")
+                continue
+
+            logger.info(f"Path {path} is new")
+            start = datetime.now()
+
+            try:
+                download_and_transfer_hour(s3_bucket, DESTDIR, path)
+            except Exception as e:
+                logger.warning("Something has gone wrong. {}".format(e))
+                break
+
+            # result = az_utils.download_files(DESTDIR, path)
+            # downloaded_file_paths = get_downloaded_files(DESTDIR,path)
+            # already_uploaded = get_uploaded_file_list(s3_bucket, path)
+
+            # for downloaded_file_path in downloaded_file_paths:
+            #     s3_destpath = downloaded_file_path.replace(f"{DESTDIR}/", "")
+            #     if (s3_destpath not in already_uploaded):
+            #         upload_file(downloaded_file_path, s3_destpath, s3_bucket)
+            
+            
+            mark_completed(path)
+            # cleanup(downloaded_file_paths)
+            log_elapsed(str, start)
+            # copy_files_in_path(path)
+            
