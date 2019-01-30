@@ -25,7 +25,7 @@ AZ_FILE_LIST =  "list --account $1 --path $2"
 S3_BUCKET_NAME = "nk-social-streamsets"
 
 COMPLETED_FILE_NAME = 'completed.txt'
-COMPLETED_RECORD_FILE_PATH = f"{DESTDIR}/{AZ_BASEDIR}/{COMPLETED_FILE_NAME}"
+COMPLETED_RECORD_FILE_PATH = "/home/dan/NewKnowledge/pyADLtoS3/completed.txt"#f"{DESTDIR}/{AZ_BASEDIR}/{COMPLETED_FILE_NAME}"
 
 # list of filepaths already loaded
 
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     s3_bucket = get_s3_bucket()
     read_completed_file_list()
     
-    for client in ["discovery"]:#CLIENTS: #TODO
+    for client in CLIENTS:
         logger.info("client: {}".format(client))
         try:
             pathlist = az_utils.get_directories_az(AZ_BASEDIR, client)
@@ -238,9 +238,8 @@ if __name__ == "__main__":
             #     if (s3_destpath not in already_uploaded):
             #         upload_file(downloaded_file_path, s3_destpath, s3_bucket)
             
-            
+            logger.info(f"Marking {path} complete")
             mark_completed(path)
             # cleanup(downloaded_file_paths)
             log_elapsed(str, start)
             # copy_files_in_path(path)
-            
